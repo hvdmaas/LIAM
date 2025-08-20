@@ -1,0 +1,561 @@
+---
+title: "LIAM Simulations: Outcomes and simulation settings"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r GlobalSettings, include=FALSE}
+library(qgraph)
+n <- 10 # number of nodes
+d <- .0003 # learning rate (epsilon)
+decay <- d # decay rate (lambda)
+db <- .001 # coupling parameter
+
+```
+
+
+```{r Functions, include=FALSE}
+# Hamiltonian (Eq. 1)
+ham=function(x,n,t,w) 
+{
+  -sum(t*x)-sum(w*x%*%t(x)/2) 
+} 
+
+
+# Learning rule for connection weights (Eq. 6)
+learnw <- function(x,w,d,decay){
+  n <- length(x)
+  for(i in 1:(n-1)){
+    for(j in (i+1):n){
+      # Update only the upper triangle
+      w[i, j] <- w[i, j] + d * (1 - abs(w[i, j])) * x[i] * x[j] - decay * w[i, j]
+      w[j, i] <- w[i, j] # Enforce symmetry by mirroring to lower triangle
+    }
+  }
+  diag(w) <- 0 # Set diagonal elements to zero (no self-connections)
+  w
+}
+
+# Learning rule for dispositions (thresholds) (Eq. 9)
+learnt=function(x,t,d,decay)
+{
+  for(i in 1:n)
+    t[i]=t[i]+d*(1-abs(t[i]))*x[i]-decay*t[i]
+  t
+}
+
+# Relabel node states to all be positive (for graphing)
+relabel=function(n,w,t,x)
+{
+  if(all(x*t(x*sign(w))>=0) & sd(x)>0) 
+    w=x*t(x*w)
+    t=x*t
+    x=x*x
+    return(list(w=w, t=t, x=x))
+}
+
+# Setup collection of Gibbs entropies
+bm <- as.matrix(expand.grid(rep(list(0:1),n))) # create matrix doubling the repetition of 1024 observations of 10 states (vars)
+# var1 = 01010101, var2 = 00110011, var3 = 0000,1111 etc.
+bm[bm==0]=-1  # change 0s to -1 
+
+# Probality for all bm (Eq. 2)
+Pr=function(n,w,t,beta)
+{
+  Pi=rep(0,2^n)
+  for(i in 1:2^n)
+    Pi[i]=exp(-beta*ham(bm[i,],n,t,w))
+  sumPi=sum(Pi)
+  for(i in 1:2^n)
+    Pi[i]=Pi[i]/sumPi
+  Pi
+}
+
+# Gibbs entropy (Eq. 3)
+entropyS=function(n,w,t,beta) 
+{
+  Pi=Pr(n,w,t,beta)
+  Si=rep(0,2^n)
+  for(i in 1:2^n) Si[i]=Pi[i]*log2(Pi[i])
+  -1*sum(Si)
+}
+``` 
+
+## Simulation 1: Hebbian learning of connection strength
+
+Setup:
+
+- dispositions are all 0, and are kept static throughout the simulation
+- attention is kept static at a moderately high value of 1 (to ensure learning can take place)
+- importance and coupling are not included in this simulation 
+- learning and decay rates are set to .0003
+
+Simulation 1A: connection weights are all set to 0 at the onset of the simulation (empty network)
+
+Simulation 1B: connection weights are sampled from normal distribution with mean 0 and sd 0.1 (random network)
+
+```{r Simulation1A, echo=FALSE, fig.height=2.3, fig.width=9.2}
+w.sd <- c(0, .1) # initial empty network (connection weight sd = 0); random network (connection weight sd = 0.1)
+t=rep(0,10) # dispositions
+m=20000# iterations
+beta=1 # attention
+dat=matrix(0,m,n) # collect x
+relabelling=T
+
+for(sim in 1:2){
+  # Initialize network
+  set.seed(100)
+  x=sample(c(-1,1),n,T) # node states
+  w=matrix(rnorm(n*n,0,w.sd[sim]),n,n) # connections
+  w[lower.tri(w)] = t(w)[lower.tri(w)] # make symmetric
+  diag(w) <- 0
+  wAll <- wAllRelabelled <- list()
+  layout(t(1:5))
+  
+  qgraph(w, color = "black", 
+         title = paste0(letters[sim], "     i = 0, M(sd) = ",
+                        round(mean(w[upper.tri(w)]),2), "(", 
+                        round(sd(w[upper.tri(w)]),2), ")"))
+    
+
+  for(j in 1:m){
+    
+    # Glauber dynamics
+    i = sample(1:n,size=1) # sample a node
+    x2=x ; x2[i]=x2[i]*-1 # construct new state with flipped node
+    p=1/(1+exp(beta*(ham(x2,n,t,w)-ham(x,n,t,w)))) # metropolis
+    if(runif(1)<p) x=x2 # update state
+    dat[j,]=x
+    
+    w=learnw(x,w,d,decay)
+    graphvars=relabel(n,w,t,x)
+    
+    if(j %% 5000 == 0){
+      if(relabelling == T){
+        qgraph(graphvars$w, color = "black", 
+               title = paste0("i = ", j, ", M(sd) = ", 
+                              round(mean(graphvars$w[upper.tri(graphvars$w)]),3),"(",
+                              round(sd(graphvars$w[upper.tri(graphvars$w)]),3), ")"))
+      } else{    
+        qgraph(w, color = x+2, 
+               title = paste0("i = ", j, ", M(sd) = ", 
+                              round(mean(w[upper.tri(w)]),3), "(", 
+                              round(sd(w[upper.tri(w)]),3), ")"))
+      }
+    }
+    
+    wAllRelabelled[[j]] <- graphvars$w
+    wAll[[j]] <- w
+  }
+  
+  # # Save (relabelled) connection strengths
+  # if(sim == 1){
+  #   save(wAll, file = 'Sim1A.wAll.Rdata')
+  #   save(wAllRelabelled, file = 'Sim1A.wAllRelabelled.Rdata') # used for visualizations
+  # } else {
+  #   save(wAll, file = 'Sim1B.wAll.Rdata')
+  #   save(wAllRelabelled, file = 'Sim1B.wAllRelabelled.Rdata')
+  # }
+}
+```
+
+# Simulation 2: Effect of learning under varying attention parameters 
+
+Setup:
+
+- dispositions are all 0, and are kept static throughout the simulation
+- connection weights are sampled from normal distribution with mean 0.05 and sd 0.01
+- importance and coupling are not included in this simulation 
+- learning and decay rates are set to .0003
+
+Attention cycle (6 cycles in total):
+
+- 400 iterations attention increases linearly from 0 to 2
+- 400 iterations attention decreases linearly from 2 to 0
+- 400 iterations attention remained at 0
+
+Simulation 2A: No connection weight updating 
+
+Simulation 2B: With connection weight updating  
+
+```{r Simulation2, echo=FALSE, fig.height=3, fig.width=9}
+learning=c(F,T)
+t=rep(0,10)
+cycles=6 
+m_beta=400
+lowbeta=0
+highbeta=2
+beta=seq(lowbeta,highbeta,length=m_beta) 
+beta=c(beta, rev(beta), rep(0,m_beta))
+beta=rep(beta,cycles)
+m=length(beta)
+
+for(sim in 1:2)
+  {
+  set.seed(15)
+  w=matrix(rnorm(n*n,0.05,0.01),n,n) 
+  w=(1-diag(n))*w
+  w[lower.tri(w)] = t(w)[lower.tri(w)]
+  x=sample(c(-1,1),n,T) 
+  
+  S=meanw=meant=rep(NA,m) 
+  dat=matrix(0,m,n)
+  S[1]=entropyS(n,w,t,beta[1])
+  
+  for (j in 1:m)
+    {
+    i = sample(1:n,size=1) # consider neibor case
+    x2=x;x2[i]=x2[i]*-1
+    p=1/(1+exp(beta[j]*(ham(x2,n,t,w)-ham(x,n,t,w))))  # metropolis
+    if(runif(1)<p) x=x2 # update state
+    dat[j,]=x
+    
+    graphvars=relabel(n,w,t,x)
+    meanw[j]=mean(w)
+    meant[j]=mean(t)
+    
+    if(learning[sim]==T){
+      w=learnw(x,w,d,decay)
+      }
+    
+    # if(j %% (5*n) == 0){
+      S[j]=entropyS(n,w,t,beta[j])     # collect S (slow);
+      # } else if(j>1) {S[j]=S[j-1]}
+    
+  }
+
+  plot(beta,type='l',ylab='',xlab='Iteration', bty = 'n', ylim = c(0, 2), xaxt = 'n',
+     cex.lab = .9)
+  axis(1, at = seq(0,7200,1200))
+  title(ylab=expression(beta), line=2.5, cex.lab=.9)
+  mtext(letters[sim], 3, 1, adj = -.09, font = 2, cex = .9)
+  
+  lines(scales::rescale(c(S,.5), c(0,2))[1:7200],type='l',col='red')
+  lines(scales::rescale(c(meanw,0,1), c(0,2))[1:7200],type='l',col='blue')
+  
+  Sim2Results <- data.frame(beta=beta, S=S, meanw=meanw)
+  
+  # # Save results
+  # if(sim == 1){
+  #   save(Sim2Results, file = 'Sim2A.Rdata')
+  # } else {
+  #   save(Sim2Results, file = 'Sim2B.Rdata')
+  # }
+}
+```
+
+# Simulation 3: Effect of coupling unstableness and attention under varying importance parameters
+
+- dispositions are all 0, and are kept static throughout the simulation
+- initial connection weights are sampled from normal distribution with mean 0.05 and sd 0.01
+- initial attention is set to 0  
+- coupling is set to .001
+- learning and decay rates are set to .0003
+- time window is set to 10 (i.e., the number of nodes)
+
+Simulation 3A: Importance is set to 1 (low importance)
+
+Simulation 3B: Importance is set to 2 (medium importance)
+
+Simulation 3C: Importance is set to 3 (high importance)
+
+```{r Simulation 3, echo=FALSE, fig.height=3, fig.width=9}
+m=5000 # interations
+t=rep(0,10)
+importance=1:3
+window <- 50 # 50 for plotting, 10 for general simulations
+set.seed(2)
+
+for(sim in 1:3)
+  {
+  w=matrix(rnorm(n*n,0.05,0.01),n,n) # biased weights
+  w=(1-diag(n))*w
+  w[lower.tri(w)] = t(w)[lower.tri(w)]
+  x=sample(c(-1,1),n,T) # start vector
+  S=meanw=meant=pp=rep(NA,m) # collect entropies
+  beta=change=rep(0,m)
+  beta[1]=0
+  dat=matrix(0,m,n) # collect x
+  S[1]=entropyS(n,w,t,beta[1])
+  Sta <- vector()
+
+  for (j in 1:m)
+    {
+    i = sample(1:n,size=1) # consider neibor case
+    x2=x;x2[i]=x2[i]*-1
+    p=1/(1+exp(beta[j]*(ham(x2,n,t,w)-ham(x,n,t,w))))  # metropolis
+    if(runif(1)<p) change[j]=1
+    if(change[j]==1) x=x2# update state
+    pp[j]=p
+    dat[j,]=x
+
+    meanw[j]=mean(abs(w))
+    meant[j]=mean(abs(t))
+
+    if(j>0)
+      {
+      d=decay=.0003 # learning paramter
+      w=learnw(x,w,d,decay)
+      }
+
+    # if(j %% (10*n) == 0){
+      S[j]=entropyS(n,w,t,beta[j]) # collect S (slow)
+      # } else if(j>1) S[j]=S[j-1]
+
+    if(j<m&j>window) beta[j+1]=(1-db)*beta[j]+db*(importance[sim]+importance[sim]*mean(change[(j-window-1):j])-beta[j]) else beta[j+1]=beta[j]
+    if(j<=m&j>window) Sta[j] <- mean(change[(j-window-1):j])
+      
+  }
+
+  plot(beta,type='l',ylab=expression(beta),xlab='Iteration', bty = 'n', ylim = c(0, 2), xaxt = 'n',
+       yaxt = 'n', cex.lab = .9)
+  axis(1, at = seq(0,m,1000))
+  axis(2, labels = FALSE, at = seq(0, 2, length.out = 3))
+  mtext(side = 2, text = seq(0,2,length.out = 3), at = seq(0, 2, length.out = 3),
+        line = 1, cex = .7)
+  axis(4, labels = FALSE, at = seq(0, 2, length.out = 3))
+  mtext(side = 4, text = seq(0,1,length.out = 3), at = seq(0, 2, length.out = 3),
+        col = "forestgreen", line = 1, cex = .7)
+  mtext(side = 4, 'Instability', at = .75, col = 'forestgreen', line = 2.5, cex = .8)
+
+  mtext(letters[sim], 3, 1.5, adj = -.09, font = 2)
+
+  lines(scales::rescale(c(S, 1, 10), c(0,2))[1:m],type='l',col='red')
+  lines(scales::rescale(c(Sta,0,1), c(0,2))[1:m],type='l',col='forestgreen', lwd=.2)
+
+  text(100,2.2,"S = 10", xpd = NA, col = 'red', cex = 1)
+  text((m-100),(S[m]/5)+.2,paste("S =", round(S[m], 2)), xpd = NA, col = 'red', cex = 1)
+  
+  Sim3Results <- data.frame(beta=beta[-(m+1)], S=S, Sta=Sta)
+  
+  # # Save results
+  # if(sim == 1){
+  #   save(Sim3Results, file = 'Sim3A.Rdata')
+  # } else if(sim == 2) {
+  #   save(Sim3Results, file = 'Sim3B.Rdata')
+  # } else{
+  #   save(Sim3Results, file = 'Sim3C.Rdata')
+  # }
+
+}
+
+```
+
+## Simulation 4: Effect of updating dispositions
+
+Setup:
+
+- dispositions are initially all -.05, except for one node, this disposition is set to .2
+- connection weights are sampled from normal distribution with mean 0.05 and sd 0.01
+- connection weight learning and disposition learning are enabled
+- attention is kept static at a moderately high value of 1 (to ensure learning can take place)
+- importance and coupling are not included in this simulation 
+- learning and decay rates are set to .0003
+
+Outcome 4A shows a result where the incongruency is solved due to the positive disposition getting aligned with the rest of the network and become negative
+
+Outcome 4B shows a result where the incongruency is solved due all other dispositions getting aligned with the strong positive disposition
+
+Outcome 4C shows a result where the incongruency is not solved and an inconsistent network emerges
+
+```{r Simulation 4: Effect of updating dispositions, echo=FALSE, fig.height=3, fig.width=7}
+m=10000 # interations
+beta=rep(1,m)
+examples=112:114
+outcomes=NULL
+set.seed(1)
+
+
+for(sim in 1:3){ # Used for figures, 1:1000 was used for overall results 
+
+set.seed(examples[sim]) # comment out for overall results
+
+  w=matrix(rnorm(n*n,0.05,0.01),n,n) # biased weights
+  w=(1-diag(n))*w
+  w[lower.tri(w)] = t(w)[lower.tri(w)]
+  t=c(.2,rep(-.05,9))
+  x=c(1,rep(-1,9))
+  meanw=meant=rep(NA,m)
+  dat=matrix(0,m,n) # collect x
+  
+  for (j in 1:m)
+  {
+    i = sample(1:n,size=1) # consider neibor case
+    x2=x;x2[i]=x2[i]*-1
+    p=1/(1+exp(beta[j]*(ham(x2,n,t,w)-ham(x,n,t,w))))  # metropolis
+    if(runif(1)<p) x=x2 # update state
+    dat[j,]=x
+  
+    meanw[j]=mean(w)
+    meant[j]=mean(t)
+    
+    w=learnw(x,w,d,decay)
+    t=learnt(x,t,d, decay)
+  }
+  
+  layout(t(1:2))
+  qgraph(w,color=1+(x+1)/2,esize=2)
+  title(letters[sim], adj=0, line = 3)
+  
+  Sim4Results <- data.frame(state = apply(dat,1,sum), meant, meanw)
+  plot(Sim4Results$state,type='l',ylab='Sum score',xlab='Iteration', bty = 'n', ylim = c(-10, 10), xaxt = 'n',
+       yaxt = 'n', cex.lab = 1.2)
+    axis(1, at = seq(0,10000,2000))
+    axis(2, labels = FALSE, at = seq(-10, 10, 5))
+    mtext(side = 2, text = seq(-10, 10, 5), at = seq(-10, 10, 5), line = 1, cex = .7)
+    axis(4, labels = FALSE, at = seq(-10, 10, length.out = 3))
+    mtext(side = 4, text = seq(-.5, .5, length.out = 3), at = seq(-10, 10, length.out = 3), line = 1, cex = .7)
+    lines(scales::rescale(c(Sim4Results$meanw, -.5, .5), c(-10,10))[1:10000],type='l',col='blue')
+    lines(scales::rescale(c(Sim4Results$meant, -.5, .5), c(-10,10))[1:10000],type='l',col='orange')
+
+  # # Save results for visualizations
+  # if(sim == 1){
+  #   save(Sim4Results, file = 'Sim4A.Rdata')
+  #   save(w, file = 'Sim4Aw.Rdata')
+  #   save(x, file = 'Sim4Ax.Rdata')
+  # } else if(sim == 2) {
+  #   save(Sim4Results, file = 'Sim4B.Rdata')
+  #   save(w, file = 'Sim4Bw.Rdata')
+  #   save(x, file = 'Sim4Bx.Rdata')
+  # } else{
+  #   save(Sim4Results, file = 'Sim4C.Rdata')
+  #   save(w, file = 'Sim4Cw.Rdata')
+  #   save(x, file = 'Sim4Cx.Rdata')
+  # }
+
+  outcomes[sim] <- sum(t>0) # count in how many simulations the attitude changed
+}
+
+# # Save overall results
+# save(outcomes, file = 'Sim4.AllOutcomes.Rdata')
+```
+
+## Simulation 5: Attitude change via importance
+
+Setup:
+
+- dispositions are initially all set to 0.2
+- connection weights are sampled from normal distribution with mean 0.05 and sd 0.01
+- connection weight learning and disposition learning are enabled
+- attention is initially set to 
+- learning and decay rates are set to .0003
+- for the first 1000 iterations, importance is set to 3, allowing the network to stabilize (representing the attitude before the intervention)
+
+The intervention takes place at iteration 1001. There are four conditions:
+
+- dispositions are all set to -0.15 in the moderately persuasive condition (left panels), or to -0.35 in the strong persuasion condition (right panels)
+- importance is set to 1 (upper panels) in the low importance condition, or stays at 3 in the high importance condition (lower panels)
+
+
+```{r Simulation 5: Attitude change, echo=FALSE}
+set.seed(2)
+
+importances=c(1,1,3,3)
+persuasion=c(-.15,-.35,-.15,-.35)
+
+for(sim in 1:4){ 
+  endStates <- vector()
+  allStates <- list()
+  
+  for(k in 1:100)
+  {
+    w=matrix(rnorm(n*n,.05,.01),n,n) # biased weights
+    w=(1-diag(n))*w
+    w[lower.tri(w)] = t(w)[lower.tri(w)]
+    t=c(rep(.2,10))
+    x=sample(c(-1,1),n,T) # start vector
+    m=1000 # interations
+    learning=T # Learning w and t
+    beta=change=rep(0,m)
+    dat=matrix(0,m,n) # collect x
+    importance=3
+    
+    for (j in 1:m)
+    {
+      i = sample(1:n,size=1) # consider neibor case
+      x2=x;x2[i]=x2[i]*-1
+      p=1/(1+exp(beta[j]*(ham(x2,n,t,w)-ham(x,n,t,w))))  # metropolis
+      if(runif(1)<p) change[j]=1 
+      if(change[j]==1) x=x2# update state
+      dat[j,]=x
+      
+      w=learnw(x,w,d,decay)
+      t=learnt(x,t,d,decay)
+        
+      if(j<m&j>10) beta[j+1]=(1-db)*beta[j]+db*(importance+importance*mean(change[(j-9):j])-beta[j]) else beta[j+1]=beta[j]
+      
+    }
+    
+    # perturbation
+    t<-rep(persuasion[sim],10)
+    beta <- beta[m]
+    change <- rep(0,m)
+    importance=importances[sim]
+  
+    for (j in 1:m)
+    {
+      i = sample(1:n,size=1) # consider neibor case
+      x2=x;x2[i]=x2[i]*-1
+      p=1/(1+exp(beta[j]*(ham(x2,n,t,w)-ham(x,n,t,w))))  # metropolis
+      if(runif(1)<p) change[j]=1
+      if(change[j]==1) x=x2# update state
+      dat[j,]=x
+      
+        w=learnw(x,w,d,decay)
+        t=learnt(x,t,d,decay)
+       if(j<m&j>10) beta[j+1]=(1-db)*beta[j]+db*(importance+importance*mean(change[(j-9):j])-beta[j]) else beta[j+1]=beta[j]
+    }
+    allStates[[k]] <- apply(dat,1,sum)
+    endStates[k] <- sum(x)
+  }
+  
+  if(sim==1){
+    statesIP1TMinus.15 <- allStates
+    endstatesIP1TMinus.15 <- endStates
+  } else if(sim ==2){
+    statesIP1TMinus.35 <- allStates
+    endstatesIP1TMinus.35 <- endStates
+  } else if (sim == 3){
+    statesIP3TMinus.15 <- allStates
+    endstatesIP3TMinus.15 <- endStates
+  } else if (sim==4){
+    statesIP3TMinus.35 <- allStates
+    endstatesIP3TMinus.35 <- endStates
+  }
+
+}
+####
+
+Sim5Results <- list(statesIP1TMinus.15 = statesIP1TMinus.15,
+                    statesIP3TMinus.15 = statesIP3TMinus.15,
+                    statesIP1TMinus.35 = statesIP1TMinus.35, 
+                    statesIP3TMinus.35 = statesIP3TMinus.35,
+                    endstatesIP1TMinus.15 = endstatesIP1TMinus.15, 
+                    endstatesIP3TMinus.15 = endstatesIP3TMinus.15,
+                    endstatesIP1TMinus.35 = endstatesIP1TMinus.35, 
+                    endstatesIP3TMinus.35 = endstatesIP3TMinus.35)
+
+
+# Plot example outcomes for k = 6
+layout(matrix(c(1,3,2,4), 2, 2))
+par(mar = c(5, 5, 5, 2) + 0.1)
+for(i in c(1,3,2,4)){ 
+  plot(Sim5Results[[i]][[6]],type='l',ylab='',xlab='', bty = 'n', ylim = c(-10, 10), xaxt = 'n',
+       yaxt = 'n', cex.lab = .8)
+  axis(1, labels = FALSE, at = seq(0,1000,200), cex.axis = .8)
+  mtext(side = 1, text = seq(0,1000,200), at = seq(0,1000,200), 
+        line = .5, cex = .7)
+  mtext(side = 1, text = 'Iteration', at = 500, 
+        line = 1.5, cex = .7)
+  
+  axis(2, labels = FALSE, at = seq(-10, 10, 10), cex.axis = .7)
+  mtext(side = 2, text = seq(-10, 10, 10), at = seq(-10, 10, 10), 
+        line = .5, cex = .7)
+  mtext(side = 2, text = 'Sum score', at = 0, 
+        line = 1.5, cex = .7)
+  mtext(side = 1, text = paste("nchange =", sum(Sim5Results[[i+4]] < 0)), line = 4)
+}
+
+# # Save results
+# save(Sim5Results, file = 'Sim5.Rdata')
+```
