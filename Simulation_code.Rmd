@@ -443,7 +443,7 @@ Setup:
 
 The intervention takes place at iteration 1001. There are four conditions:
 
-- dispositions are all set to -0.15 in the moderately persuasive condition (left panels), or to -0.35 in the strong persuasion condition (right panels)
+- dispositions are all adjusted with -0.35 in the moderately persuasive condition (left panels), or with -0.55 in the strong persuasion condition (right panels)
 - importance is set to 1 (upper panels) in the low importance condition, or stays at 3 in the high importance condition (lower panels)
 
 
@@ -451,7 +451,7 @@ The intervention takes place at iteration 1001. There are four conditions:
 set.seed(2)
 
 importances=c(1,1,3,3)
-persuasion=c(-.15,-.35,-.15,-.35)
+persuasion=c(-.35,-.55,-.35,-.55)
 
 for(sim in 1:4){ 
   endStates <- vector()
@@ -487,7 +487,7 @@ for(sim in 1:4){
     }
     
     # perturbation
-    t<-rep(persuasion[sim],10)
+    t <- t + persuasion[sim]
     beta <- beta[m]
     change <- rep(0,m)
     importance=importances[sim]
@@ -510,30 +510,30 @@ for(sim in 1:4){
   }
   
   if(sim==1){
-    statesIP1TMinus.15 <- allStates
-    endstatesIP1TMinus.15 <- endStates
-  } else if(sim ==2){
     statesIP1TMinus.35 <- allStates
     endstatesIP1TMinus.35 <- endStates
+  } else if(sim ==2){
+    statesIP1TMinus.55 <- allStates
+    endstatesIP1TMinus.55 <- endStates
   } else if (sim == 3){
-    statesIP3TMinus.15 <- allStates
-    endstatesIP3TMinus.15 <- endStates
-  } else if (sim==4){
     statesIP3TMinus.35 <- allStates
     endstatesIP3TMinus.35 <- endStates
+  } else if (sim==4){
+    statesIP3TMinus.55 <- allStates
+    endstatesIP3TMinus.55 <- endStates
   }
 
 }
 ####
 
-Sim5Results <- list(statesIP1TMinus.15 = statesIP1TMinus.15,
-                    statesIP3TMinus.15 = statesIP3TMinus.15,
-                    statesIP1TMinus.35 = statesIP1TMinus.35, 
+Sim5Results <- list(statesIP1TMinus.35 = statesIP1TMinus.35,
                     statesIP3TMinus.35 = statesIP3TMinus.35,
-                    endstatesIP1TMinus.15 = endstatesIP1TMinus.15, 
-                    endstatesIP3TMinus.15 = endstatesIP3TMinus.15,
+                    statesIP1TMinus.55 = statesIP1TMinus.55, 
+                    statesIP3TMinus.55 = statesIP3TMinus.55,
                     endstatesIP1TMinus.35 = endstatesIP1TMinus.35, 
-                    endstatesIP3TMinus.35 = endstatesIP3TMinus.35)
+                    endstatesIP3TMinus.35 = endstatesIP3TMinus.35,
+                    endstatesIP1TMinus.55 = endstatesIP1TMinus.55, 
+                    endstatesIP3TMinus.55 = endstatesIP3TMinus.55)
 
 
 # Plot example outcomes for k = 6
